@@ -374,7 +374,7 @@ module.exports = class Exchange {
     }
 
     nonce () {
-        return this.seconds ()
+        return now ()
     }
 
     milliseconds () {
