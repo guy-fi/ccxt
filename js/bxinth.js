@@ -227,14 +227,13 @@ module.exports = class bxinth extends Exchange {
 
     async cancelOrder (id, symbol = undefined, params = {}) {
         await this.loadMarkets ();
-        let pairing = undefined; // TODO fixme
         return await this.privatePostCancel ({
             'order_id': id,
-            'pairing': pairing,
+            'pairing': this.marketId (symbol),
         });
     }
 
-    async parseOrder (order, market = undefined) {
+    parseOrder (order, market = undefined) {
         let side = this.safeString (order, 'order_type');
         let symbol = undefined;
         if (market === undefined) {
@@ -269,7 +268,7 @@ module.exports = class bxinth extends Exchange {
             market = this.market (symbol);
             request['pairing'] = market['id'];
         }
-        let response = this.privatePostGetorders (this.extend (request, params));
+        let response = await this.privatePostGetorders (this.extend (request, params));
         let orders = this.parseOrders (response['orders'], market, since, limit);
         return this.filterBySymbol (orders, symbol);
     }
@@ -306,5 +305,56 @@ module.exports = class bxinth extends Exchange {
             if (response['success'])
                 return response;
         throw new ExchangeError (this.id + ' ' + this.json (response));
+    }
+
+    parseMyTrade (fiatTrade, cryptoTrade) {
+        return {
+            'id': fiatTrade.ref_id,
+            'timestamp': (new Date(fiatTrade.date.replace(" ", "T").concat("Z"))).valueOf(),
+            'price': Math.abs(parseFloat(fiatTrade.amount)) / Math.abs(parseFloat(cryptoTrade.amount)),
+            'amount': Math.abs(parseFloat(cryptoTrade.amount)),
+            'cost': Math.abs(parseFloat(fiatTrade.amount)),
+            'symbol': cryptoTrade.currency,
+            'side': (parseFloat(cryptoTrade.amount) < 0) ? "sell" : "buy",
+            'order': fiatTrade.ref_id,
+        };
+    }
+
+    parseMyTrades (trades, market = undefined) {
+        let parsedTrades = [];
+        let tradePairs = trades.reduce(function (result, t) {
+            if (!result[t.ref_id]) {
+                result[t.ref_id] = [];
+            }
+            result[t.ref_id].push(t);
+            return result;
+        }, {});
+
+        for (let i = 0; i < Object.keys(tradePairs).length; i++) {
+            let tradePair = tradePairs[Object.keys(tradePairs)[i]];
+
+            let fiatTrade = tradePair.find(function (t) {
+                return t.currency == "THB";
+            });
+
+            let cryptoTrade = tradePair.find(function (t) {
+                return t.currency != "THB";
+            });
+
+            if (tradePair.length != 2 || !fiatTrade || !cryptoTrade) {
+                console.error("bxinth", "cannot form trade pair", tradePair);
+                continue;
+            }
+            let parsedTrade = this.parseMyTrade (fiatTrade, cryptoTrade);
+            parsedTrades.push (parsedTrade);
+        }
+        return parsedTrades;
+    }
+
+    async fetchMyTrades (symbol = undefined, since = undefined, limit = undefined, params = {}) {
+        await this.loadMarkets ();
+        let market = this.market (symbol);
+        let response = await this.privatePostHistory ({'type' : 'trade'});
+        return this.parseMyTrades (response.transactions, market);
     }
 };
