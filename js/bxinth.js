@@ -213,6 +213,9 @@ module.exports = class bxinth extends Exchange {
 
     async createOrder (symbol, type, side, amount, price = undefined, params = {}) {
         await this.loadMarkets ();
+        if (side == "buy") {
+            amount = amount * price;
+        }
         let response = await this.privatePostOrder (this.extend ({
             'pairing': this.marketId (symbol),
             'type': side,
