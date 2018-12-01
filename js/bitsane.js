@@ -458,4 +458,40 @@ module.exports = class bitsane extends Exchange {
             return response;
         }
     }
+
+    async fetchMyTrades (symbol = undefined, since = undefined, limit = undefined, params = {}) {
+        if (typeof symbol === 'undefined')
+            throw new ExchangeError (this.id + ' fetchOpenOrders requires a symbol argument');
+        await this.loadMarkets ();
+        let market = this.market (symbol);
+        if (since === undefined) {
+            since = 1;
+        }
+        let response = await this.privatePostOrdersHistory ({ 'pair': market['id'], since });
+        return this.parseTrades (response['result'], market, since, limit).filter(t => t.amount > 0);
+    }
+
+    parseTrade (trade, market = undefined) {
+        let timestamp = trade['timestamp'];
+        let symbol = undefined;
+        if (market)
+            symbol = market['symbol'];
+        let side = this.safeString (trade, 'side');
+        let price = this.safeFloat (trade, 'price');
+        let amount = this.safeFloat (trade, 'executed_amount');
+        let cost = price * amount;
+        return {
+            'id': this.safeString (trade, 'id'),
+            'timestamp': timestamp * 1000,
+            'datetime': this.iso8601 (timestamp),
+            'symbol': symbol,
+            'type': undefined,
+            'side': side,
+            'price': price,
+            'amount': amount,
+            'cost': cost,
+            'order': undefined,
+            'info': trade,
+        };
+    }
 };
