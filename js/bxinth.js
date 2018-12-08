@@ -18,6 +18,7 @@ module.exports = class bxinth extends Exchange {
                 'CORS': false,
                 'fetchTickers': true,
                 'fetchOpenOrders': true,
+                'withdraw': true,
             },
             'urls': {
                 'logo': 'https://user-images.githubusercontent.com/1294454/27766412-567b1eb4-5ed7-11e7-94a8-ff6a3884f6c5.jpg',
@@ -359,5 +360,22 @@ module.exports = class bxinth extends Exchange {
         let market = this.market (symbol);
         let response = await this.privatePostHistory ({'type' : 'trade'});
         return this.parseMyTrades (response.transactions, market);
+    }
+
+    async withdraw (code, amount, address, tag = undefined, params = {}) {
+        await this.loadMarkets ();
+        this.checkAddress (address);
+        let currency = this.currency (code);
+        let request = {
+            'amount': amount,
+            'address': address,
+            'currency': currency.code
+        };
+        // console.log(request);
+        let response = await this.privatePostWithdrawal (request);
+        return {
+            'info': response,
+            'id': response['withdrawal_id'],
+        };
     }
 };
