@@ -18,6 +18,7 @@ module.exports = class bitmarket extends Exchange {
                 'CORS': false,
                 'fetchOHLCV': true,
                 'withdraw': true,
+                'fetchOpenOrders': true,
             },
             'timeframes': {
                 '90m': '90m',
@@ -174,6 +175,7 @@ module.exports = class bitmarket extends Exchange {
                     },
                 },
             },
+            'exceptions': {},
         });
     }
 
@@ -240,19 +242,20 @@ module.exports = class bitmarket extends Exchange {
     }
 
     parseTrade (trade, market = undefined) {
-        let side = (trade['type'] === 'bid') ? 'buy' : 'sell';
-        let timestamp = trade['date'] * 1000;
+        let type = trade['type'] === 'buy' ? 'bid' : 'ask';
+        let timestamp = trade['time'] * 1000;
         return {
-            'id': trade['tid'].toString (),
+            'id': trade['id'].toString (),
             'info': trade,
             'timestamp': timestamp,
             'datetime': this.iso8601 (timestamp),
             'symbol': market['symbol'],
             'order': undefined,
-            'type': undefined,
-            'side': side,
-            'price': trade['price'],
-            'amount': trade['amount'],
+            'type': type,
+            'side': trade['type'],
+            'price': trade['rate'],
+            'amount': trade['amountCrypto'],
+            'cost': trade['amountFiat']
         };
     }
 
@@ -262,6 +265,50 @@ module.exports = class bitmarket extends Exchange {
             'market': market['id'],
         }, params));
         return this.parseTrades (response, market, since, limit);
+    }
+
+    async fetchMyTrades (symbol, since = undefined, limit = undefined, params = {}) {
+        let market = this.market (symbol);
+        let req = {
+            'market': market['id'],
+        }
+        if (limit != undefined) {
+            req.count = limit
+        }
+        let response = await this.privatePostTrades (this.extend (req, params));
+        return this.parseTrades (response.data.results, market, since, limit);
+    }
+
+    async fetchOpenOrders (symbol = undefined, since = undefined, limit = undefined, params = {}) {
+        let market = this.market (symbol);
+        let response = await this.privatePostOrders (this.extend ({
+            'market': market['id'],
+        }, params));
+        let orders = [...response.data.sell, ...response.data.buy];
+        return this.parseOrders (orders, market, since, limit);
+    }
+
+    parseOrder (order, market = undefined) {
+        let id = this.safeString (order, 'id');
+        let side = this.safeString (order, 'type');
+        let amount = this.safeFloat (order, 'amount');
+        let price = this.safeFloat (order, 'rate');
+        let timestamp = this.safeInteger (order, 'timestamp');
+        let symbol = undefined;
+        if (!market)
+            market = this.safeValue (this.marketsById, this.safeString (order, 'market'));
+        if (market)
+            symbol = market['symbol'];
+        return {
+            'id': order.id,
+            'datetime': this.iso8601 (order.time),
+            'timestamp': order.time,
+            'symbol': symbol,
+            'side': order.type,
+            'price': price,
+            'amount': order.amount,
+            'info': order,
+        };
     }
 
     parseOHLCV (ohlcv, market = undefined, timeframe = '90m', since = undefined, limit = undefined) {
@@ -296,7 +343,7 @@ module.exports = class bitmarket extends Exchange {
             'info': response,
         };
         if ('id' in response['data'])
-            result['id'] = response['id'];
+            result['id'] = response['data']['id'];
         return result;
     }
 
@@ -357,7 +404,7 @@ module.exports = class bitmarket extends Exchange {
             url += '/' + this.implodeParams (path + '.json', params);
         } else {
             this.checkRequiredCredentials ();
-            let nonce = this.nonce ();
+            let nonce = Math.round(this.nonce () / 1000);
             let query = this.extend ({
                 'tonce': nonce,
                 'method': path,
@@ -369,5 +416,25 @@ module.exports = class bitmarket extends Exchange {
             };
         }
         return { 'url': url, 'method': method, 'body': body, 'headers': headers };
+    }
+
+    handleErrors (httpCode, reason, url, method, headers, body, response = undefined) {
+        if (typeof body !== 'string')
+            return; // fallback to default error handler
+        if (body.length < 2)
+            return; // fallback to default error handler
+        if ((body[0] === '{') || (body[0] === '[')) {
+            response = JSON.parse (body);
+            // fetchDepositAddress returns {"error": "No permission found"} on apiKeys that don't have the permission required
+            let error = this.safeString (response, 'errorMsg');
+            let exceptions = this.exceptions;
+            if (error in exceptions) {
+                throw new exceptions[error] (this.id + ' ' + body);
+            }
+            let status = this.safeString (response, 'error') != undefined ? 'error' : '';
+            if (status === 'error') {
+                throw new ExchangeError (this.id + ' ' + body);
+            }
+        }
     }
 };
