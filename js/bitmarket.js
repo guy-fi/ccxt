@@ -366,7 +366,7 @@ module.exports = class bitmarket extends Exchange {
         let method = undefined;
         let request = {
             'currency': currency['id'],
-            'quantity': amount,
+            'amount': amount,
         };
         if (this.isFiat (code)) {
             method = 'privatePostWithdrawFiat';
